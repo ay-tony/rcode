@@ -1,6 +1,3 @@
-use std::{env, io};
-use std::{error::Error, io::Write};
-
 use async_openai::{
     Client,
     config::OpenAIConfig,
@@ -10,20 +7,67 @@ use async_openai::{
         CreateChatCompletionRequestArgs,
     },
 };
+use std::{
+    env,
+    error::Error,
+    io::{self, Write},
+};
+
+struct Agent {
+    client: Client<OpenAIConfig>,
+    messages: Vec<ChatCompletionRequestMessage>,
+}
+
+impl Agent {
+    fn new(api_key: &str) -> Result<Self, Box<dyn Error>> {
+        let config = OpenAIConfig::new()
+            .with_api_key(api_key)
+            .with_api_base("https://api.kimi.com/coding/v1")
+            .with_header("User-Agent", "claude-code/2.1.116")?;
+        let client = Client::with_config(config);
+        Ok(Self {
+            client,
+            messages: vec![
+                ChatCompletionRequestSystemMessage::from("You are a helpful assistant.").into(),
+            ],
+        })
+    }
+
+    async fn chat(&mut self, input: &str) -> Result<String, Box<dyn Error>> {
+        self.messages
+            .push(ChatCompletionRequestUserMessage::from(input).into());
+
+        let request = CreateChatCompletionRequestArgs::default()
+            .model("kimi-for-coding")
+            .messages(self.messages.clone())
+            .build()?;
+
+        let response = self.client.chat().create(request).await?;
+
+        let content = response
+            .choices
+            .first()
+            .ok_or("API return empty choices")?
+            .message
+            .content
+            .clone()
+            .ok_or("response content is empty")?;
+
+        self.messages
+            .push(ChatCompletionRequestAssistantMessage::from(content.clone()).into());
+
+        Ok(content)
+    }
+
+    fn clear(&mut self) {
+        self.messages.truncate(1);
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let api_key = env::var("KIMI_API_KEY").expect("环境变量 KIMI_API_KEY 未设置");
-
-    let config = OpenAIConfig::new()
-        .with_api_key(api_key)
-        .with_api_base("https://api.kimi.com/coding/v1")
-        .with_header("User-Agent", "claude-code/2.1.116")?;
-
-    let client = Client::with_config(config);
-
-    let mut messages: Vec<ChatCompletionRequestMessage> =
-        vec![ChatCompletionRequestSystemMessage::from("You are a helpful assistant.").into()];
+    let api_key = env::var("KIMI_API_KEY")?;
+    let mut kimi = Agent::new(&api_key)?;
 
     loop {
         print!("> ");
@@ -33,35 +77,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
         io::stdin().read_line(&mut input)?;
         let input = input.trim();
 
-        if input == "exit" {
-            break;
-        }
-
         if input.is_empty() {
             continue;
         }
 
-        messages.push(ChatCompletionRequestUserMessage::from(input).into());
+        if input == "/exit" {
+            break;
+        }
 
-        let request = CreateChatCompletionRequestArgs::default()
-            .model("kimi-for-coding")
-            .messages(messages.clone())
-            .build()?;
+        if input == "/clear" {
+            kimi.clear();
+            println!("all messages cleared!");
+            continue;
+        }
 
-        let response = client.chat().create(request).await?;
-
-        let content = response
-            .choices
-            .first()
-            .ok_or("API 返回空 choices")?
-            .message
-            .content
-            .clone()
-            .ok_or("回复内容为空")?;
-
-        println!("{}", content);
-
-        messages.push(ChatCompletionRequestAssistantMessage::from(content).into());
+        println!("{}", kimi.chat(&input).await?);
     }
 
     Ok(())
