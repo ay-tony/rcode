@@ -10,6 +10,7 @@ use async_openai::{
         FunctionObjectArgs,
     },
 };
+use serde::Deserialize;
 use serde_json::json;
 use std::{
     env,
@@ -17,23 +18,52 @@ use std::{
     io::{self, Write},
 };
 
+#[derive(Deserialize)]
+struct Config {
+    llm: LlmConfig,
+    agent: AgentConfig,
+}
+
+#[derive(Deserialize)]
+struct LlmConfig {
+    api_key: String,
+    api_base: String,
+}
+
+#[derive(Deserialize)]
+struct AgentConfig {
+    model: String,
+    system_prompt: String,
+}
+
+impl Config {
+    fn from_file(path: &str) -> Result<Config, Box<dyn Error>> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Error reading config file '{}': {}", path, e))?;
+        let config: Config =
+            toml::from_str(&content).map_err(|e| format!("Config file syntax error: {}", e))?;
+        Ok(config)
+    }
+}
+
 struct Agent {
     client: Client<OpenAIConfig>,
     messages: Vec<ChatCompletionRequestMessage>,
     tools: Vec<ChatCompletionTools>,
+    config: AgentConfig,
 }
 
 impl Agent {
-    fn new(api_key: &str) -> Result<Self, Box<dyn Error>> {
-        let config = OpenAIConfig::new()
-            .with_api_key(api_key)
-            .with_api_base("https://api.siliconflow.cn/v1");
-        let client = Client::with_config(config);
+    fn new(config: Config) -> Result<Self, Box<dyn Error>> {
+        let openai_config = OpenAIConfig::new()
+            .with_api_key(config.llm.api_key)
+            .with_api_base(config.llm.api_base);
+        let client = Client::with_config(openai_config);
 
         Ok(Self {
             client,
             messages: vec![
-                ChatCompletionRequestSystemMessage::from("You are a helpful assistant.").into(),
+                ChatCompletionRequestSystemMessage::from(config.agent.system_prompt.clone()).into(),
             ],
             tools: vec![ChatCompletionTools::Function(ChatCompletionTool {
                 function: FunctionObjectArgs::default()
@@ -53,6 +83,7 @@ impl Agent {
                     .strict(true)
                     .build()?,
             })],
+            config: config.agent,
         })
     }
 
@@ -62,7 +93,7 @@ impl Agent {
 
         loop {
             let request = CreateChatCompletionRequestArgs::default()
-                .model("Qwen/Qwen3.6-27B")
+                .model(self.config.model.clone())
                 .messages(self.messages.clone())
                 .tools(self.tools.clone())
                 .build()?;
@@ -147,7 +178,7 @@ impl Agent {
 
                         println!("[rcode] tool_call: {:?}", function_tool.function);
                         println!("[rcode] id: {}", function_tool.id);
-                        println!("[rcode] result: {}", result);
+                        println!("[rcode] result: {}", result.replace("\n", "\n[rcode] "));
 
                         Ok((result, function_tool.id.clone()))
                     }
@@ -161,10 +192,25 @@ impl Agent {
     }
 }
 
+fn resolve_config_path() -> Result<String, Box<dyn Error>> {
+    // 优先用当前目录的 .rcode.toml
+    if std::path::Path::new(".rcode.toml").exists() {
+        return Ok(".rcode.toml".to_string());
+    }
+
+    // 回退到 ~/.rcode.toml
+    let home = env::var("HOME")?;
+    let global = format!("{}/.rcode.toml", home);
+    if std::path::Path::new(&global).exists() {
+        return Ok(global);
+    }
+
+    Err("Failed to find .rcode.toml. Please create it in current directory or at ~/.rcode.toml as global.".into())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let api_key = env::var("RCODE_API_KEY")?;
-    let mut agent = Agent::new(&api_key)?;
+    let mut agent = Agent::new(Config::from_file(&resolve_config_path()?)?)?;
 
     loop {
         print!("> ");
