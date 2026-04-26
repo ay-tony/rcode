@@ -2,17 +2,20 @@ use async_openai::{
     Client,
     config::OpenAIConfig,
     types::chat::{
+        ChatCompletionMessageToolCall, ChatCompletionMessageToolCallChunk,
         ChatCompletionMessageToolCalls, ChatCompletionRequestAssistantMessage,
         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
         ChatCompletionRequestSystemMessage, ChatCompletionRequestToolMessageArgs,
         ChatCompletionRequestToolMessageContent, ChatCompletionRequestUserMessage,
-        ChatCompletionTool, ChatCompletionTools, CreateChatCompletionRequestArgs,
-        FunctionObjectArgs,
+        ChatCompletionTool, ChatCompletionTools, CreateChatCompletionRequestArgs, FinishReason,
+        FunctionCall, FunctionObjectArgs,
     },
 };
+use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
 use std::{
+    collections::HashMap,
     env,
     error::Error,
     io::{self, Write},
@@ -96,52 +99,129 @@ impl Agent {
                 .model(self.config.model.clone())
                 .messages(self.messages.clone())
                 .tools(self.tools.clone())
+                .stream(true)
                 .build()?;
 
-            let response_message = self
-                .client
-                .chat()
-                .create(request)
-                .await?
-                .choices
-                .first()
-                .ok_or("API return no choices")?
-                .message
-                .clone();
+            let mut stream = self.client.chat().create_stream(request).await?;
+            let mut lock = io::stdout().lock();
 
-            if let Some(tool_calls) = response_message.tool_calls {
-                self.messages.push(
-                    ChatCompletionRequestAssistantMessageArgs::default()
-                        .tool_calls(tool_calls.clone())
-                        .build()?
-                        .into(),
-                );
+            let mut full_content = String::new();
+            let mut tool_call_chunks: Vec<ChatCompletionMessageToolCallChunk> = Vec::new();
 
-                for tool_call in tool_calls {
-                    let (result, id) = self.execute_tool(&tool_call)?;
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk?;
 
-                    self.messages.push(
-                        ChatCompletionRequestToolMessageArgs::default()
-                            .content(ChatCompletionRequestToolMessageContent::Text(result))
-                            .tool_call_id(id)
-                            .build()?
-                            .into(),
-                    );
+                if let Some(choice) = chunk.choices.first() {
+                    // 如果是对话
+                    if let Some(text) = &choice.delta.content {
+                        write!(lock, "{}", text)?;
+                        full_content.push_str(text);
+                    }
+
+                    // 如果是工具调用
+                    if let Some(calls) = &choice.delta.tool_calls {
+                        tool_call_chunks.extend(calls.clone());
+                    }
+
+                    // 检查结束原因
+                    match &choice.finish_reason {
+                        // 对话结束
+                        Some(FinishReason::Stop) => {
+                            if !full_content.ends_with('\n') {
+                                write!(lock, "\n")?;
+                            }
+                            self.messages.push(
+                                ChatCompletionRequestAssistantMessage::from(full_content.clone())
+                                    .into(),
+                            );
+                            return Ok(full_content);
+                        }
+
+                        // 工具调用结束
+                        Some(FinishReason::ToolCalls) => {
+                            write!(lock, "\n")?;
+                            let tool_calls = self.build_tool_calls(tool_call_chunks)?;
+
+                            self.messages.push(
+                                ChatCompletionRequestAssistantMessageArgs::default()
+                                    .tool_calls(tool_calls.clone())
+                                    .build()?
+                                    .into(),
+                            );
+
+                            // 执行每个工具
+                            for tool_call in tool_calls {
+                                let (result, id) = self.execute_tool(&tool_call)?;
+
+                                self.messages.push(
+                                    ChatCompletionRequestToolMessageArgs::default()
+                                        .content(ChatCompletionRequestToolMessageContent::Text(
+                                            result,
+                                        ))
+                                        .tool_call_id(id)
+                                        .build()?
+                                        .into(),
+                                );
+                            }
+                            break;
+                        }
+
+                        _ => {}
+                    }
+
+                    lock.flush()?;
                 }
-
-                continue;
             }
-
-            let content = response_message
-                .content
-                .clone()
-                .ok_or("response content is empty")?;
-
-            self.messages
-                .push(ChatCompletionRequestAssistantMessage::from(content.clone()).into());
-
-            return Ok(content);
         }
+    }
+
+    fn build_tool_calls(
+        &self,
+        chunks: Vec<ChatCompletionMessageToolCallChunk>,
+    ) -> Result<Vec<ChatCompletionMessageToolCalls>, Box<dyn Error>> {
+        // index -> (id, name, arguments)
+        let mut groups: HashMap<u32, (Option<String>, Option<String>, String)> = HashMap::new();
+
+        for chunk in chunks {
+            let entry = groups
+                .entry(chunk.index)
+                .or_insert((None, None, String::new()));
+            if let Some(id) = chunk.id {
+                entry.0 = Some(id);
+            }
+            if let Some(func) = chunk.function {
+                if let Some(name) = func.name {
+                    entry.1 = Some(name);
+                }
+                if let Some(args) = func.arguments {
+                    entry.2.push_str(&args);
+                }
+            }
+        }
+
+        let mut result = Vec::new();
+        let mut indices: Vec<_> = groups.keys().cloned().collect();
+        indices.sort();
+
+        for idx in indices {
+            let (id, name, args) = groups
+                .remove(&idx)
+                .ok_or("Failed to remove item from hashmap")?;
+            let id = id.ok_or("Missing tool call id")?;
+            let name = name.ok_or("Missing tool call name")?;
+
+            result.push(ChatCompletionMessageToolCalls::Function(
+                ChatCompletionMessageToolCall {
+                    id,
+                    function: FunctionCall {
+                        name,
+                        arguments: args,
+                    },
+                },
+            ));
+        }
+
+        Ok(result)
     }
 
     fn clear(&mut self) {
@@ -234,7 +314,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             continue;
         }
 
-        println!("{}", agent.chat(&input).await?);
+        agent.chat(&input).await?;
     }
 
     Ok(())
