@@ -1,5 +1,6 @@
 mod agent;
 mod config;
+mod render;
 mod tools;
 
 use crate::{

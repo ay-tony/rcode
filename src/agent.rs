@@ -1,5 +1,6 @@
 use crate::{
     config::{AgentConfig, Config},
+    render::{clear_lines_above, count_lines_in_terminal, render_markdown},
     tools::execute_command,
 };
 use async_openai::{
@@ -102,8 +103,15 @@ impl Agent {
                         // 对话结束
                         Some(FinishReason::Stop) => {
                             if !full_content.ends_with('\n') {
+                                full_content += "\n";
                                 writeln!(lock)?;
                             }
+                            drop(lock);
+
+                            let count = count_lines_in_terminal(&full_content).unwrap_or(0);
+                            clear_lines_above(count);
+                            render_markdown(&full_content);
+
                             self.messages.push(
                                 ChatCompletionRequestAssistantMessage::from(full_content.clone())
                                     .into(),
