@@ -16,6 +16,7 @@ use async_openai::{
         FunctionCall, FunctionObjectArgs,
     },
 };
+use crossterm::terminal;
 use futures::StreamExt;
 use serde_json::json;
 use std::{
@@ -108,7 +109,11 @@ impl Agent {
                             }
                             drop(lock);
 
-                            let count = count_lines_in_terminal(&full_content).unwrap_or(0);
+                            let count = count_lines_in_terminal(
+                                &full_content,
+                                terminal::size()?.0 as usize,
+                            )
+                            .unwrap_or(0);
                             clear_lines_above(count);
                             render_markdown(&full_content);
 

@@ -1,22 +1,39 @@
-use crossterm::terminal;
 use std::error::Error;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthStr, UnicodeWidthChar};
 
-pub fn count_lines_in_terminal(text: &str) -> Result<usize, Box<dyn Error>> {
-    let (col, _) = terminal::size()?;
+fn count_visual_lines(line: &str, term_width: usize) -> usize {
+    if line.is_empty() {
+        return 1;
+    }
+    
+    let mut lines = 0;
+    let mut current_width = 0;
+    
+    for c in line.chars() {
+        let w = c.width().unwrap_or(0);
+        // 如果当前行放不下这个字符，先换行
+        if current_width + w > term_width {
+            lines += 1;
+            current_width = w;
+        } else {
+            current_width += w;
+        }
+    }
+    
+    if current_width > 0 {
+        lines += 1;
+    }
+    
+    lines
+}
+
+pub fn count_lines_in_terminal(text: &str, term_width: usize) -> Result<usize, Box<dyn Error>> {
     let lines = text.lines();
     let mut result = if text.width() == 0 {
         0
     } else {
         lines
-            .map(|line| {
-                let w = line.width();
-                if w == 0 {
-                    1
-                } else {
-                    (line.width() + col as usize - 1) / (col as usize)
-                }
-            })
+            .map(|line| count_visual_lines(line, term_width))
             .sum()
     };
     if text.ends_with('\n') {
@@ -26,7 +43,7 @@ pub fn count_lines_in_terminal(text: &str) -> Result<usize, Box<dyn Error>> {
 }
 
 pub fn clear_lines_above(n: usize) {
-    print!("\x1B[{n}A\x1B[G\x1B[0J");
+    print!("\n\x1B[{n}A\x1B[G\x1B[0J");
 }
 
 pub fn render_markdown(text: &str) {
