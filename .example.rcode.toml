@@ -4,4 +4,4 @@ api_base = "https://api.siliconflow.cn/v1"
 
 [agent]
 model = "Qwen/Qwen3.6-27B"
-system_prompt = "You are a helpful assistant."
+system_prompt = "default_system_prompt.md"

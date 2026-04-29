@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::{env, error::Error, io::Write};
+use std::{env, error::Error};
 
 #[derive(Deserialize)]
 pub struct Config {
@@ -23,8 +23,18 @@ impl Config {
     pub fn from_file(path: &str) -> Result<Config, Box<dyn Error>> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Error reading config file '{}': {}", path, e))?;
-        let config: Config =
+        let mut config: Config =
             toml::from_str(&content).map_err(|e| format!("Config file syntax error: {}", e))?;
+
+        // system_prompt 字段为相对于配置目录的文件路径，读取其内容
+        let config_dir = std::path::Path::new(path)
+            .parent()
+            .ok_or("Invalid config file path")?;
+        let prompt_path = config_dir.join(&config.agent.system_prompt);
+        let prompt_content = std::fs::read_to_string(&prompt_path)
+            .map_err(|e| format!("Error reading system prompt file '{}': {}", prompt_path.display(), e))?;
+        config.agent.system_prompt = prompt_content;
+
         Ok(config)
     }
 }
@@ -51,9 +61,14 @@ mod tests {
 
     #[test]
     fn parse_valid_config() {
-        let mut tmpfile = tempfile::NamedTempFile::new().unwrap();
-        writeln!(
-            tmpfile,
+        let tmpdir = tempfile::tempdir().unwrap();
+
+        let prompt_path = tmpdir.path().join("default_system_prompt.md");
+        std::fs::write(&prompt_path, "You are a test assistant.").unwrap();
+
+        let config_path = tmpdir.path().join("config.toml");
+        std::fs::write(
+            &config_path,
             r#"
 [llm]
 api_key = "test-key"
@@ -61,12 +76,12 @@ api_base = "https://test.com"
 
 [agent]
 model = "test-model"
-system_prompt = "You are a test assistant."
-"#
+system_prompt = "default_system_prompt.md"
+"#,
         )
         .unwrap();
 
-        let config = Config::from_file(tmpfile.path().to_str().unwrap()).unwrap();
+        let config = Config::from_file(config_path.to_str().unwrap()).unwrap();
         assert_eq!(config.llm.api_key, "test-key");
         assert_eq!(config.llm.api_base, "https://test.com");
         assert_eq!(config.agent.model, "test-model");
