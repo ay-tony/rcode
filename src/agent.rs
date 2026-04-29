@@ -229,9 +229,9 @@ impl Agent {
 
                         let result = execute_command(command)?;
 
-                        println!("[rcode] tool_call: {:?}", function_tool.function);
-                        println!("[rcode] id: {}", function_tool.id);
-                        println!("[rcode] result: {}", result.replace("\n", "\n[rcode] "));
+                        // println!("[rcode] tool_call: {:?}", function_tool.function);
+                        // println!("[rcode] id: {}", function_tool.id);
+                        // println!("[rcode] result: {}", result.replace("\n", "\n[rcode] "));
 
                         Ok((result, function_tool.id.clone()))
                     }

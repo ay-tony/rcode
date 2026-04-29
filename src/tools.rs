@@ -1,6 +1,7 @@
 use std::error::Error;
 
 pub fn execute_command(command: &str) -> Result<String, Box<dyn Error>> {
+    println!("[rcode] execute_command: {}", command);
     let output = std::process::Command::new("sh")
         .arg("-c")
         .arg(command)
