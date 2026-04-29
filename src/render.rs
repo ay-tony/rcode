@@ -41,7 +41,7 @@ pub fn count_lines_in_terminal(text: &str, term_width: usize) -> Result<usize, B
 }
 
 pub fn clear_lines_above(n: usize) {
-    print!("\n\x1B[{n}A\x1B[G\x1B[0J");
+    print!("\n\x1B[{n}F\x1B[0J");
 }
 
 pub fn render_markdown(text: &str) {
