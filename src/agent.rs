@@ -13,7 +13,7 @@ use async_openai::{
         ChatCompletionRequestSystemMessage, ChatCompletionRequestToolMessageArgs,
         ChatCompletionRequestToolMessageContent, ChatCompletionRequestUserMessage,
         ChatCompletionTool, ChatCompletionTools, CreateChatCompletionRequestArgs, FinishReason,
-        FunctionCall, FunctionObjectArgs,
+        FunctionCall, FunctionCallStream, FunctionObjectArgs, FunctionType,
     },
 };
 use crossterm::terminal;
@@ -127,7 +127,7 @@ impl Agent {
                         // 工具调用结束
                         Some(FinishReason::ToolCalls) => {
                             writeln!(lock)?;
-                            let tool_calls = self.build_tool_calls(tool_call_chunks)?;
+                            let tool_calls = Self::build_tool_calls(tool_call_chunks)?;
 
                             self.messages.push(
                                 ChatCompletionRequestAssistantMessageArgs::default()
@@ -163,7 +163,6 @@ impl Agent {
     }
 
     fn build_tool_calls(
-        &self,
         chunks: Vec<ChatCompletionMessageToolCallChunk>,
     ) -> Result<Vec<ChatCompletionMessageToolCalls>, Box<dyn Error>> {
         // index -> (id, name, arguments)
