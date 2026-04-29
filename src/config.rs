@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::{env, error::Error};
+use std::{env, error::Error, io::Write};
 
 #[derive(Deserialize)]
 pub struct Config {
@@ -42,5 +42,40 @@ pub fn resolve_config_path() -> Result<String, Box<dyn Error>> {
         return Ok(global);
     }
 
-    Err("Failed to find .rcode.toml. Please create it in current directory or at ~/.rcode.toml as global.".into())
+    Err("Failed to find .rcode.toml. Please create it in current directory or at ~/.rcode.toml as global".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_valid_config() {
+        let mut tmpfile = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            tmpfile,
+            r#"
+[llm]
+api_key = "test-key"
+api_base = "https://test.com"
+
+[agent]
+model = "test-model"
+system_prompt = "You are a test assistant."
+"#
+        )
+        .unwrap();
+
+        let config = Config::from_file(tmpfile.path().to_str().unwrap()).unwrap();
+        assert_eq!(config.llm.api_key, "test-key");
+        assert_eq!(config.llm.api_base, "https://test.com");
+        assert_eq!(config.agent.model, "test-model");
+        assert_eq!(config.agent.system_prompt, "You are a test assistant.");
+    }
+
+    #[test]
+    fn parse_invalid_config() {
+        let config = Config::from_file("./invalid_config_path");
+        assert!(config.is_err());
+    }
 }
