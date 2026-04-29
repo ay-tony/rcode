@@ -18,3 +18,20 @@ pub fn execute_command(command: &str) -> Result<String, Box<dyn Error>> {
 
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn echo_command_returns_output() {
+        let result = execute_command("echo hello").unwrap();
+        assert_eq!(result.trim(), "hello");
+    }
+
+    #[test]
+    fn invalid_command_returns_error_message() {
+        let result = execute_command("nonexistent_command_12345").unwrap();
+        assert!(result.contains("not found"));
+    }
+}
