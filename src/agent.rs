@@ -244,3 +244,127 @@ impl Agent {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_tool_call_from_chunks() {
+        let chunks = vec![
+            ChatCompletionMessageToolCallChunk {
+                index: 0,
+                id: Some("call_1".to_string()),
+                r#type: Some(FunctionType::Function),
+                function: Some(FunctionCallStream {
+                    name: Some("execute_command".to_string()),
+                    arguments: None,
+                }),
+            },
+            ChatCompletionMessageToolCallChunk {
+                index: 0,
+                id: None,
+                r#type: None,
+                function: Some(FunctionCallStream {
+                    name: None,
+                    arguments: Some("{\"command\": \"ls\"}".to_string()),
+                }),
+            },
+        ];
+
+        let tool_calls = Agent::build_tool_calls(chunks);
+        assert!(tool_calls.is_ok());
+
+        let tool_calls = tool_calls.unwrap();
+        assert_eq!(tool_calls.len(), 1);
+
+        assert_eq!(
+            tool_calls[0],
+            ChatCompletionMessageToolCalls::Function(ChatCompletionMessageToolCall {
+                id: "call_1".to_string(),
+                function: FunctionCall {
+                    name: "execute_command".to_string(),
+                    arguments: "{\"command\": \"ls\"}".to_string(),
+                },
+            },)
+        );
+    }
+
+    #[test]
+    fn multiple_tool_calls_from_chunks() {
+        let chunks = vec![
+            ChatCompletionMessageToolCallChunk {
+                index: 0,
+                id: Some("call_1".to_string()),
+                r#type: Some(FunctionType::Function),
+                function: Some(FunctionCallStream {
+                    name: Some("execute_command".to_string()),
+                    arguments: None,
+                }),
+            },
+            ChatCompletionMessageToolCallChunk {
+                index: 0,
+                id: None,
+                r#type: None,
+                function: Some(FunctionCallStream {
+                    name: None,
+                    arguments: Some("{\"command\": \"ls\"}".to_string()),
+                }),
+            },
+            ChatCompletionMessageToolCallChunk {
+                index: 1,
+                id: Some("call_2".to_string()),
+                r#type: Some(FunctionType::Function),
+                function: Some(FunctionCallStream {
+                    name: Some("execute_command".to_string()),
+                    arguments: None,
+                }),
+            },
+            ChatCompletionMessageToolCallChunk {
+                index: 1,
+                id: None,
+                r#type: None,
+                function: Some(FunctionCallStream {
+                    name: None,
+                    arguments: Some("{\"command\": \"ls".to_string()),
+                }),
+            },
+            ChatCompletionMessageToolCallChunk {
+                index: 1,
+                id: None,
+                r#type: None,
+                function: Some(FunctionCallStream {
+                    name: None,
+                    arguments: Some(" -al\"}".to_string()),
+                }),
+            },
+        ];
+
+        let tool_calls = Agent::build_tool_calls(chunks);
+        assert!(tool_calls.is_ok());
+
+        let tool_calls = tool_calls.unwrap();
+        assert_eq!(tool_calls.len(), 2);
+
+        assert_eq!(
+            tool_calls[0],
+            ChatCompletionMessageToolCalls::Function(ChatCompletionMessageToolCall {
+                id: "call_1".to_string(),
+                function: FunctionCall {
+                    name: "execute_command".to_string(),
+                    arguments: "{\"command\": \"ls\"}".to_string(),
+                },
+            },)
+        );
+        assert_eq!(
+            tool_calls[1],
+            ChatCompletionMessageToolCalls::Function(ChatCompletionMessageToolCall {
+                id: "call_2".to_string(),
+                function: FunctionCall {
+                    name: "execute_command".to_string(),
+                    arguments: "{\"command\": \"ls -al\"}".to_string(),
+                },
+            },)
+        );
+    }
+}
