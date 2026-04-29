@@ -30,19 +30,19 @@ impl Config {
 }
 
 pub fn resolve_config_path() -> Result<String, Box<dyn Error>> {
-    // 优先用当前目录的 .rcode.toml
-    if std::path::Path::new(".rcode.toml").exists() {
-        return Ok(".rcode.toml".to_string());
+    // 优先用当前目录的 .rcode/config.toml
+    if std::path::Path::new(".rcode/config.toml").exists() {
+        return Ok(".rcode/config.toml".to_string());
     }
 
-    // 回退到 ~/.rcode.toml
+    // 回退到 ~/.rcode/config.toml
     let home = env::var("HOME")?;
-    let global = format!("{}/.rcode.toml", home);
+    let global = format!("{}/.rcode/config.toml", home);
     if std::path::Path::new(&global).exists() {
         return Ok(global);
     }
 
-    Err("Failed to find .rcode.toml. Please create it in current directory or at ~/.rcode.toml as global".into())
+    Err("Failed to find .rcode/config.toml. Please create it in current directory or at ~/.rcode/config.toml as global".into())
 }
 
 #[cfg(test)]
