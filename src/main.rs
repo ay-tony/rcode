@@ -1,44 +1,53 @@
-mod agent;
-mod config;
-mod render;
-mod tools;
+use crossterm::ExecutableCommand;
+use crossterm::event::{self, Event, KeyCode};
+use crossterm::terminal::EnterAlternateScreen;
+use crossterm::terminal::LeaveAlternateScreen;
+use crossterm::terminal::disable_raw_mode;
+use crossterm::terminal::enable_raw_mode;
+use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::{Terminal, backend::CrosstermBackend};
+use std::io::{Result, stdout};
 
-use crate::{
-    agent::Agent,
-    config::{Config, resolve_config_path},
-};
-use std::{
-    error::Error,
-    io::{self, Write},
-};
+struct TerminalGuard;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    let mut agent = Agent::new(Config::from_file(&resolve_config_path()?)?)?;
+impl TerminalGuard {
+    fn new() -> Result<Self> {
+        stdout().execute(EnterAlternateScreen)?;
+        enable_raw_mode()?;
+        Ok(Self)
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = stdout().execute(LeaveAlternateScreen);
+    }
+}
+
+fn main() -> Result<()> {
+    let _terminal_guard = TerminalGuard::new()?;
+
+    let backend = CrosstermBackend::new(stdout());
+    let mut terminal = Terminal::new(backend)?;
 
     loop {
-        print!("> ");
-        io::stdout().flush()?;
+        terminal.draw(|frame| {
+            let area = frame.area(); // 整个屏幕区域
+            let block = Block::default().borders(Borders::ALL).title("Hello");
+            let paragraph = Paragraph::new("Hello, Ratatui! 🐭").block(block);
 
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let input = input.trim();
+            frame.render_widget(paragraph, area);
+        })?;
 
-        if input.is_empty() {
-            continue;
+        // 异步检查 50ms 内按键按下
+        if event::poll(std::time::Duration::from_millis(50))? {
+            if let Event::Key(key) = event::read()? {
+                if key.code == KeyCode::Char('q') {
+                    break;
+                }
+            }
         }
-
-        if input == "/exit" {
-            break;
-        }
-
-        if input == "/clear" {
-            agent.clear();
-            println!("[rcode] All messages cleared!");
-            continue;
-        }
-
-        agent.chat(input).await?;
     }
 
     Ok(())
