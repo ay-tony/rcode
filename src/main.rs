@@ -1,3 +1,8 @@
+mod agent;
+mod config;
+mod render;
+mod tools;
+
 use crossterm::ExecutableCommand;
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::EnterAlternateScreen;
@@ -8,12 +13,14 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::io::{Result, stdout};
+use std::error::Error;
+use std::io::stdout;
+use std::result::Result;
 
 struct TerminalGuard;
 
 impl TerminalGuard {
-    fn new() -> Result<Self> {
+    fn new() -> Result<Self, Box<dyn Error>> {
         stdout().execute(EnterAlternateScreen)?;
         enable_raw_mode()?;
         Ok(Self)
@@ -29,6 +36,7 @@ impl Drop for TerminalGuard {
 
 enum Message {
     User(String),
+    Assistant(String),
 }
 
 struct App {
@@ -51,17 +59,26 @@ impl Default for App {
     }
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let _terminal_guard = TerminalGuard::new()?;
-
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
     let mut app = App::default();
+    let mut agent = crate::agent::Agent::new(crate::config::Config::from_file(
+        &crate::config::resolve_config_path()?,
+    )?)?;
 
     loop {
         let mut message_text = String::new();
         for message in &app.messages {
-            let Message::User(content) = message;
-            message_text.push_str(&format!("[User] {}\n", content));
+            match message {
+                Message::User(content) => {
+                    message_text.push_str(&format!("[User] {}\n", content));
+                }
+                Message::Assistant(content) => {
+                    message_text.push_str(&format!("[Assistant] {}\n", content));
+                }
+            }
         }
 
         terminal.draw(|frame| {
@@ -109,6 +126,14 @@ fn main() -> Result<()> {
                     KeyCode::Enter => {
                         if !app.input.is_empty() {
                             app.messages.push(Message::User(app.input.clone()));
+
+                            match agent.chat(&app.input).await {
+                                Ok(result) => app.messages.push(Message::Assistant(result)),
+                                Err(e) => app
+                                    .messages
+                                    .push(Message::Assistant(format!("Error: {}", e))),
+                            }
+
                             app.input.clear();
                         }
                     }
