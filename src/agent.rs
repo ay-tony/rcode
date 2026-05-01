@@ -18,11 +18,7 @@ use async_openai::{
 
 use futures::StreamExt;
 use serde_json::json;
-use std::{
-    collections::HashMap,
-    error::Error,
-    io::{self, Write},
-};
+use std::{collections::HashMap, error::Error};
 
 pub struct Agent {
     client: Client<OpenAIConfig>,
@@ -78,7 +74,6 @@ impl Agent {
                 .build()?;
 
             let mut stream = self.client.chat().create_stream(request).await?;
-            let mut lock = io::stdout().lock();
 
             let mut full_content = String::new();
             let mut tool_call_chunks: Vec<ChatCompletionMessageToolCallChunk> = Vec::new();
@@ -89,7 +84,6 @@ impl Agent {
                 if let Some(choice) = chunk.choices.first() {
                     // 如果是对话
                     if let Some(text) = &choice.delta.content {
-                        //write!(lock, "{}", text)?;
                         full_content.push_str(text);
                     }
 
@@ -104,17 +98,7 @@ impl Agent {
                         Some(FinishReason::Stop) => {
                             if !full_content.ends_with('\n') {
                                 full_content += "\n";
-                                //writeln!(lock)?;
                             }
-                            drop(lock);
-
-                            /*let count = count_lines_in_terminal(
-                                &full_content,
-                                terminal::size()?.0 as usize,
-                            )
-                            .unwrap_or(0);
-                            clear_lines_above(count);
-                            render_markdown(&full_content);*/
 
                             self.messages.push(
                                 ChatCompletionRequestAssistantMessage::from(full_content.clone())
@@ -125,7 +109,6 @@ impl Agent {
 
                         // 工具调用结束
                         Some(FinishReason::ToolCalls) => {
-                            writeln!(lock)?;
                             let tool_calls = Self::build_tool_calls(tool_call_chunks)?;
 
                             self.messages.push(
@@ -154,8 +137,6 @@ impl Agent {
 
                         _ => {}
                     }
-
-                    lock.flush()?;
                 }
             }
         }
